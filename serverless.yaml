@@ -1,0 +1,70 @@
+service: securepayments
+frameworkVersion: '2'
+
+provider:
+  name: aws
+  runtime: python3.9
+  iam:    
+    role:
+      statements:
+        - Effect: 'Allow'
+          Action:
+            - '*'
+          Resource:           
+            - '*'  
+
+functions:
+  generateFakeTransaction:
+    handler: handler.generate_fake_transaction
+  encryptTransaction:
+    handler: handler.encrypt_data
+  addToDatabase:
+    handler: handler.add_to_ddb_and_sqs
+  decryptTransaction:
+    handler: handler.decrypt_transaction
+    events:    
+      - stream:
+          type: dynamodb
+          arn: arn:aws:dynamodb:us-east-1:888:table/test_table_2/stream/2021-11-11T13:48:06.303
+            
+
+stepFunctions:
+  stateMachines:
+    securepayments:
+      name: paymentSecurity
+      definition:
+        StartAt: generateFakeData
+        States: 
+          generateFakeData:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [generateFakeTransaction, Arn]
+            Catch:
+              - ErrorEquals: ["States.ALL"]
+                Next: PaymentProcessingError 
+            Next: encryptTransaction
+          encryptTransaction:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [encryptTransaction, Arn] 
+            Next: addToDatabase
+          addToDatabase:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [addToDatabase, Arn]
+            Next: decryptTransaction
+          decryptTransaction:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [decryptTransaction, Arn]
+            End: True
+          PaymentProcessingError:
+            Type: Pass
+            Result: "There was a critial error"
+            Next: generateFakeData
+           
+
+plugins:
+  - serverless-step-functions
+  - serverless-python-requirements
+  - serverless-pseudo-parameters
