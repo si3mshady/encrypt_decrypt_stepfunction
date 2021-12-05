@@ -100,8 +100,6 @@ def decrypt_transaction(data,context):
     decrypted_message_decoded = decrypted_message.decode()
     return decrypted_message_decoded
     
- 
-
 
 #Elliott Arnold - stepfunction workflow - encrypt/ decrypt payment information 
 #12-5-21 part 2 
