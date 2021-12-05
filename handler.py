@@ -4,6 +4,19 @@ from datetime import datetime
 from faker import Faker
 fake = Faker()
 
+TABLE_NAME = 'transactions'
+KEY_NAME = 'symmetric.key'
+BUCKET_NAME = 'symmetric-key-si3mshady'
+
+def get_encryption_key():
+    s3 = boto3.client('s3')
+    s3_response = s3.get_object(Bucket=BUCKET_NAME, Key=KEY_NAME)
+    encryption_key = s3_response['Body'].read()
+    print(encryption_key)
+    return encryption_key
+
+
+
 def get_secret(secret_name):    
     if secret_name == "sqs_url":
         key = "sqs_url"    
@@ -12,10 +25,8 @@ def get_secret(secret_name):
     return json.loads(result)[key]
 
 def encrypt_data(data,context):
-    key = Fernet.generate_key()
-    print(type(key))
-    print(str(key))
-    fernet = Fernet(key)
+ 
+    fernet = Fernet(get_encryption_key())
     encMessage = fernet.encrypt(data.encode())   
     return {"data":encMessage}
     
@@ -50,10 +61,47 @@ def add_to_ddb_and_sqs(data,context):
     sqs = boto3.client('sqs')   
     encrypted_transaction = {"data":{'S': data['data']}, "id": {'S': id  }}
     sqs_url = get_secret(secret_name="sqs_url")  
-    kwargs = {"QueueUrl": sqs_url, "MessageBody": id } 
-      
-    ddb.put_item(TableName='test_table_2', Item=encrypted_transaction)
+    kwargs = {"QueueUrl": sqs_url, "MessageBody": id }       
+    r = ddb.put_item(TableName=TABLE_NAME, Item=encrypted_transaction)
     sqs.send_message(**kwargs)
+    return sqs_url 
+  
+
+def get_id_from_sqs(sqs_url):
+    sqs = boto3.client('sqs')  
+    kwargs = {"QueueUrl": sqs_url,"MaxNumberOfMessages":1,
+    "VisibilityTimeout":5 } 
+    response = sqs.receive_message(**kwargs)    
+    return response.get('Messages')[0]['Body']
+
+def get_from_ddb(message_id):
+    ddb = boto3.resource('dynamodb')
+    table = ddb.Table(TABLE_NAME)
+    try:
+        response = table.get_item(
+            TableName=TABLE_NAME,
+            Key={
+                'id': message_id
+                }
+        
+        )
+       
+        return response
+    except Exception as e:
+        print(e)
+
     
 def decrypt_transaction(data,context):
-    print(data)
+    
+    message_id = get_id_from_sqs(data)
+    data=get_from_ddb(message_id).get('Item').get('data')
+    fernet = Fernet(get_encryption_key())
+    decrypted_message = fernet.decrypt(data.encode())   
+    decrypted_message_decoded = decrypted_message.decode()
+    return decrypted_message_decoded
+    
+ 
+
+
+#Elliott Arnold - stepfunction workflow - encrypt/ decrypt payment information 
+#12-5-21 part 2 
